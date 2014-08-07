@@ -63,6 +63,7 @@ import netrc
 import operator
 import urlparse
 from distutils.spawn import find_executable
+import getpass
 
 locale.setlocale(locale.LC_ALL, '')
 ENCODING = locale.getpreferredencoding() or 'UTF-8'
@@ -109,6 +110,7 @@ if features['geoip']:
 config = ConfigParser.SafeConfigParser()
 config.add_section('Connection')
 config.set('Connection', 'password', '')
+config.set('Connection', 'prompt_password', 'False')
 config.set('Connection', 'username', '')
 config.set('Connection', 'port', '9091')
 config.set('Connection', 'host', 'localhost')
@@ -3621,17 +3623,7 @@ def read_netrc(file=os.environ['HOME'] + '/.netrc', hostname=None):
 
 
 # create initial config file
-def create_config(option, opt_str, value, parser):
-    configfile = parser.values.configfile
-    config.read(configfile)
-    if parser.values.connection:
-        host, port, path, username, password = explode_connection_string(parser.values.connection)
-        config.set('Connection', 'host', host)
-        config.set('Connection', 'port', str(port))
-        config.set('Connection', 'path', path)
-        config.set('Connection', 'username', username)
-        config.set('Connection', 'password', password)
-
+def create_config(configfile):
     # create directory if necessary
     dir = os.path.dirname(configfile)
     if dir != '' and not os.path.isdir(dir):
@@ -3650,6 +3642,8 @@ def create_config(option, opt_str, value, parser):
 def save_config(filepath, force=False):
     if force or os.path.isfile(filepath):
         try:
+            if config.getboolean('Connection', 'prompt_password'):
+                config.remove_option('Connection', 'password')
             config.write(open(filepath, 'w'))
             os.chmod(filepath, 0600)  # config may contain password
             return 1
@@ -3681,19 +3675,20 @@ if __name__ == '__main__':
     parser.add_option("-v", "--version", action="callback", callback=show_version,
                       help="Show version number and supported Transmission versions.")
     parser.add_option("-c", "--connect", action="store", dest="connection", default="",
-                      help="Point to the server using pattern [username:password@]host[:port]/[path]")
+                      help="Point to the server using pattern [username:password@]host[:port][/path]")
+    parser.add_option("--prompt-password", action="store_true", dest="prompt_password", default=False,
+                      help="Prompt for the password (won't be stored).")
     parser.add_option("-s", "--ssl", action="store_true", dest="ssl", default=False,
                       help="Connect to Transmission using SSL.")
     parser.add_option("-f", "--config", action="store", dest="configfile", default=default_config_path,
                       help="Path to configuration file.")
-    parser.add_option("--create-config", action="callback", callback=create_config,
+    parser.add_option("--create-config", action="store_true", dest="create_config", default=False,
                       help="Create configuration file CONFIGFILE with default values.")
     parser.add_option("-n", "--netrc", action="store_true", dest="use_netrc", default=False,
                       help="Get authentication info from your ~/.netrc file.")
     parser.add_option("--debug", action="store_true", dest="DEBUG", default=False,
                       help="Everything passed to the debug() function will be added to the file debug.log.")
     (cmd_args, transmissionremote_args) = parser.parse_args()
-
 
     # read config from config file
     config.read(cmd_args.configfile)
@@ -3706,6 +3701,10 @@ if __name__ == '__main__':
         config.set('Connection', 'path', path)
         config.set('Connection', 'username', username)
         config.set('Connection', 'password', password)
+        config.set('Connection', 'prompt_password', cmd_args.prompt_password.__str__())
+    if cmd_args.create_config:
+        config.set('Connection', 'prompt_password', cmd_args.prompt_password.__str__())
+        create_config(cmd_args.configfile)
     if cmd_args.use_netrc:
         username, password = read_netrc(hostname=config.get('Connection','host'))
         config.set('Connection', 'username', username)
@@ -3713,7 +3712,9 @@ if __name__ == '__main__':
     if cmd_args.ssl:
         config.set('Connection', 'ssl', 'True')
 
-
+    if config.getboolean('Connection', 'prompt_password'):
+        password = getpass.getpass()
+        config.set('Connection', 'password', password)
 
     # forward arguments after '--' to transmission-remote
     if transmissionremote_args:
